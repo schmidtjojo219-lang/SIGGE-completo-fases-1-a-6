@@ -1,0 +1,298 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// EXTENSÃO PARA RLS (Row Level Security)
+// ============================================
+// As policies são criadas via migration SQL
+// Cada tabela tenantizada tem gremio_id + RLS policy
+
+model Gremio {
+  id                 String   @id @default(uuid()) @db.Uuid
+  nome               String
+  subdominio         String   @unique
+  logo               String?
+  brasao             String?
+  status_assinatura  String   @default("trial") // ativo, trial, suspenso, cancelado
+  data_expiracao     DateTime?
+  salt_hash          String   @default("")
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  // Relacionamentos
+  usuarios           Usuario[]
+  niveis_acesso      NivelAcesso[]
+  documentos         Documento[]
+  patrimonios        Patrimonio[]
+  transacoes         Transacao[]
+  categorias_custo   CategoriaCusto[]
+  eleicoes           Eleicao[]
+  logs_seguranca     LogSeguranca[]
+  chamados           Chamado[]
+
+  @@map("gremios")
+}
+
+model NivelAcesso {
+  id          String   @id @default(uuid()) @db.Uuid
+  gremio_id   String   @db.Uuid
+  nome_cargo  String
+  permissoes  Json
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  gremio      Gremio   @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  usuarios    Usuario[]
+
+  @@index([gremio_id])
+  @@map("niveis_acesso")
+}
+
+model Usuario {
+  id                String   @id @default(uuid()) @db.Uuid
+  gremio_id         String   @db.Uuid
+  nome              String
+  email             String
+  matricula         String
+  senha_hash        String
+  nivel_acesso_id   String   @db.Uuid
+  assinatura_png    String?
+  ativo             Boolean  @default(true)
+  token_version     Int      @default(0)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  gremio            Gremio   @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  nivel_acesso      NivelAcesso @relation(fields: [nivel_acesso_id], references: [id])
+
+  documentos_criados Documento[]
+  assinaturas       DocumentoAssinante[]
+  transacoes        Transacao[]
+  logs              LogSeguranca[]
+  chamados          Chamado[]
+
+  @@unique([gremio_id, email])
+  @@unique([gremio_id, matricula])
+  @@index([gremio_id])
+  @@map("usuarios")
+}
+
+model Documento {
+  id              String   @id @default(uuid()) @db.Uuid
+  gremio_id       String   @db.Uuid
+  tipo            String   // oficio, ata, memorando, declaracao, outro
+  titulo          String
+  conteudo_html   String   @db.Text
+  status          String   @default("rascunho") // rascunho, em_assinatura, assinado, cancelado
+  hash_sha256     String?
+  created_by      String   @db.Uuid
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  gremio          Gremio   @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  autor           Usuario  @relation(fields: [created_by], references: [id])
+  assinantes      DocumentoAssinante[]
+  validacao       ValidacaoPublica?
+
+  @@index([gremio_id])
+  @@index([gremio_id, status])
+  @@index([gremio_id, created_at])
+  @@map("documentos")
+}
+
+model DocumentoAssinante {
+  id                String    @id @default(uuid()) @db.Uuid
+  documento_id      String    @db.Uuid
+  usuario_id        String    @db.Uuid
+  data_assinatura   DateTime?
+  ordem             Int
+  ip_assinatura     String?
+  created_at        DateTime  @default(now())
+
+  documento         Documento @relation(fields: [documento_id], references: [id], onDelete: Cascade)
+  usuario           Usuario   @relation(fields: [usuario_id], references: [id])
+
+  @@unique([documento_id, usuario_id])
+  @@index([documento_id])
+  @@index([usuario_id])
+  @@map("documento_assinantes")
+}
+
+model ValidacaoPublica {
+  id            String   @id @default(uuid()) @db.Uuid
+  hash          String   @unique
+  documento_id  String   @unique @db.Uuid
+  data_criacao  DateTime @default(now())
+
+  documento     Documento @relation(fields: [documento_id], references: [id], onDelete: Cascade)
+
+  @@index([hash])
+  @@map("validacao_publica")
+}
+
+model Patrimonio {
+  id                String    @id @default(uuid()) @db.Uuid
+  gremio_id         String    @db.Uuid
+  codigo            String
+  nome              String
+  descricao         String?
+  categoria         String
+  localizacao       String
+  valor_aquisicao   Decimal?  @db.Decimal(15, 2)
+  data_aquisicao    DateTime?
+  foto_url          String?
+  status            String    @default("ativo") // ativo, em_manutencao, baixado, extraviado
+  ultimo_inventario DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  gremio            Gremio    @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+
+  @@unique([gremio_id, codigo])
+  @@index([gremio_id])
+  @@index([gremio_id, status])
+  @@index([gremio_id, categoria])
+  @@map("patrimonios")
+}
+
+model CategoriaCusto {
+  id        String   @id @default(uuid()) @db.Uuid
+  gremio_id String   @db.Uuid
+  nome      String
+  tipo      String   // entrada, saida
+  created_at DateTime @default(now())
+
+  gremio     Gremio     @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  transacoes Transacao[]
+
+  @@unique([gremio_id, nome])
+  @@index([gremio_id])
+  @@map("categorias_custo")
+}
+
+model Transacao {
+  id                    String   @id @default(uuid()) @db.Uuid
+  gremio_id             String   @db.Uuid
+  tipo                  String   // entrada, saida
+  categoria_id          String   @db.Uuid
+  descricao             String
+  valor                 Decimal  @db.Decimal(15, 2)
+  data                  DateTime
+  comprovante_url       String
+  status_auditoria      String   @default("pendente") // pendente, aprovada, necessita_esclarecimento
+  observacao_auditoria  String?
+  created_by            String   @db.Uuid
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  gremio      Gremio        @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  categoria   CategoriaCusto @relation(fields: [categoria_id], references: [id])
+  criador     Usuario       @relation(fields: [created_by], references: [id])
+
+  @@index([gremio_id])
+  @@index([gremio_id, data])
+  @@index([gremio_id, status_auditoria])
+  @@map("transacoes")
+}
+
+model Eleicao {
+  id                  String   @id @default(uuid()) @db.Uuid
+  gremio_id           String   @db.Uuid
+  titulo              String
+  status              String   @default("preparacao") // preparacao, censu, habilitacao, votacao, apuracao, encerrada
+  data_inicio         DateTime?
+  data_fim            DateTime?
+  resultado_liberado  Boolean  @default(false)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  gremio    Gremio    @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  eleitores Eleitor[]
+  chapas    Chapa[]
+
+  @@index([gremio_id])
+  @@index([gremio_id, status])
+  @@map("eleicoes")
+}
+
+model Eleitor {
+  id                String    @id @default(uuid()) @db.Uuid
+  eleicao_id        String    @db.Uuid
+  matricula         String
+  nome              String
+  habilitado        Boolean   @default(false)
+  codigo_acesso     String?
+  codigo_expiracao  DateTime?
+  votou             Boolean   @default(false)
+  created_at        DateTime  @default(now())
+
+  eleicao   Eleicao   @relation(fields: [eleicao_id], references: [id], onDelete: Cascade)
+
+  @@unique([eleicao_id, matricula])
+  @@index([eleicao_id])
+  @@index([eleicao_id, habilitado])
+  @@map("eleitores")
+}
+
+model Chapa {
+  id         String   @id @default(uuid()) @db.Uuid
+  eleicao_id String   @db.Uuid
+  numero     Int
+  nome       String
+  membros    String
+  votos      Int      @default(0)
+  created_at DateTime @default(now())
+
+  eleicao    Eleicao  @relation(fields: [eleicao_id], references: [id], onDelete: Cascade)
+
+  @@unique([eleicao_id, numero])
+  @@index([eleicao_id])
+  @@map("chapas")
+}
+
+model LogSeguranca {
+  id         String   @id @default(uuid()) @db.Uuid
+  gremio_id  String?  @db.Uuid
+  usuario_id String?  @db.Uuid
+  acao       String
+  ip         String
+  user_agent String
+  sucesso    Boolean
+  detalhes   String?
+  created_at DateTime @default(now())
+
+  gremio     Gremio?   @relation(fields: [gremio_id], references: [id], onDelete: SetNull)
+  usuario    Usuario?  @relation(fields: [usuario_id], references: [id], onDelete: SetNull)
+
+  @@index([gremio_id])
+  @@index([created_at])
+  @@index([acao])
+  @@map("logs_seguranca")
+}
+
+model Chamado {
+  id          String   @id @default(uuid()) @db.Uuid
+  gremio_id   String   @db.Uuid
+  usuario_id  String   @db.Uuid
+  titulo      String
+  descricao   String
+  status      String   @default("aberto") // aberto, em_andamento, resolvido, fechado
+  prioridade  String   @default("media") // baixa, media, alta, urgente
+  resposta    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  gremio      Gremio   @relation(fields: [gremio_id], references: [id], onDelete: Cascade)
+  usuario     Usuario  @relation(fields: [usuario_id], references: [id])
+
+  @@index([gremio_id])
+  @@index([gremio_id, status])
+  @@index([status, prioridade])
+  @@map("chamados")
+}
