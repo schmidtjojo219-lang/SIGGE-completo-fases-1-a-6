@@ -102,7 +102,7 @@ export default function EleicoesPage() {
                   <div className="space-y-2">
                     {eleicao.chapas.map((chapa, i) => (
                       <div key={chapa.id} className="flex items-center justify-between">
-                        <span className="text-gray-700 dark:text-gray-300">{chapa.numero} - {chapa.name}</span>
+                        <span className="text-gray-700 dark:text-gray-300">{chapa.numero} - {chapa.nome}</span>
                         <span className="font-semibold text-gray-900 dark:text-white">{chapa.votos} votos</span>
                       </div>
                     ))}
