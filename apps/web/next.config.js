@@ -1,9 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    ppr: true,
-    dynamicIO: true,
-  },
+  // Funções experimentais removidas para garantir compatibilidade com a versão estável
   images: {
     domains: ['localhost'],
   },
@@ -30,4 +27,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = nextConfig; 
